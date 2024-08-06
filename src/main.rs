@@ -131,26 +131,23 @@ async fn main() {
                         let chapter = format!("https://www.bqgui.cc{}", &chapter[0][7..]);
                         chapter_list.push(chapter.to_string());
                     }
+                    println!("{:?}", chapter_list);
                     let mut count = Arc::new(tokio::sync::Semaphore::new(thread_number));
                     let mut chapter_content = Arc::new(Mutex::new(Vec::<(u32, String)>::new()));
-                    let mut index = Arc::new(Mutex::new(0));
+                    let mut index = 0;
                     let mut join_list = Vec::new();
                     for chapter_url in chapter_list {
                         let url = chapter_url.clone();
                         let counter_clone = Arc::clone(&count);
-                        let index_clone = Arc::clone(&index);
                         let chapter_content_clone = Arc::clone(&chapter_content);
                         let permit = counter_clone.acquire_owned().await;
                         join_list.push(tokio::spawn(async move {
                             let content = get_content(&url).await;
-
                             match content {
                                 Ok(content) => {
                                     let mut chapter_content = chapter_content_clone.lock().unwrap();
-                                    let mut index1 = index_clone.lock().unwrap();
-                                    println!("index: {}, url: {}", *index1, url);
-                                    chapter_content.push((*index1, content));
-                                    *index1 += 1;
+                                    println!("index: {}, url: {}", index, url);
+                                    chapter_content.push((index, content));
                                 }
                                 Err(e) => {
                                     println!("Error: {}", e);
@@ -158,7 +155,9 @@ async fn main() {
                             }
                             drop(permit);
                         }));
+                        index += 1;
                     }
+
                     for join in join_list {
                         join.await.unwrap();
                     }
