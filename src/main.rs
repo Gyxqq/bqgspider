@@ -29,7 +29,8 @@ async fn get_content(url: &str) -> Result<String, reqwest::Error> {
                                 content_string.push_str(&title[0][21..]);
                             }
                             None => {
-                                println!("No title error");
+                                println!("No title error url {}", url);
+                                continue;
                             }
                         }
                         reg = Regex::new("[^>]+<br /><br />").unwrap();
