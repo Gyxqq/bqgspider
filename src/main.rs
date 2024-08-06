@@ -3,8 +3,64 @@ use reqwest::{self, Url};
 use std::{
     fs::File,
     io::{stdin, Write},
+    ops::Index,
+    os::{self, windows::thread},
+    sync::{Arc, Mutex},
 };
-use tokio;
+use tokio::{self, sync::Semaphore};
+
+async fn get_content(url: &str) -> Result<String, reqwest::Error> {
+    let mut retry_time = 0;
+    loop {
+        if retry_time > 10 {
+            println!("Retry too many times, exit");
+            return Ok(format!("Retry too many times, exit url {}", url));
+        }
+        let body = reqwest::get(url).await;
+        match body {
+            Ok(response) => {
+                let body = response.text().await;
+                match body {
+                    Ok(text) => {
+                        let mut content_string = String::new();
+                        let mut reg = Regex::new("<h1 class=\"wap_none\">[^<]+").unwrap();
+                        let title = reg.captures(text.as_str());
+                        match title {
+                            Some(title) => {
+                                println!("Title: {}", &title[0][21..]);
+                                content_string.push_str(&title[0][21..]);
+                            }
+                            None => {
+                                println!("No title error");
+                            }
+                        }
+                        reg = Regex::new("[^>]+<br /><br />").unwrap();
+                        let contents = reg.captures_iter(text.as_str());
+
+                        for content in contents {
+                            // 跳过最后一个
+                            if content[0].contains("https://m.bqgui.cc") {
+                                continue;
+                            }
+                            // println!("{}", &content[0]);
+                            content_string.push_str(&content[0].replace("<br /><br />", "\n"));
+                        }
+                        content_string.push_str("\n\n");
+                        return Ok(content_string);
+                    }
+                    Err(e) => {
+                        println!("Error: {}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                println!("Error: {}", e);
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(20));
+        retry_time += 1;
+    }
+}
 #[tokio::main]
 async fn main() {
     // 输入小说地址
@@ -56,58 +112,48 @@ async fn main() {
                         let chapter = format!("https://www.bqgui.cc{}", &chapter[0][7..]);
                         chapter_list.push(chapter.to_string());
                     }
+                    let mut count = Arc::new(tokio::sync::Semaphore::new(50));
+                    let mut chapter_content = Arc::new(Mutex::new(Vec::<(u32, String)>::new()));
+                    let mut index = Arc::new(Mutex::new(0));
+                    let mut join_list = Vec::new();
                     for chapter_url in chapter_list {
-                        loop {
-                            let body = reqwest::get(&chapter_url).await;
-                            match body {
-                                Ok(response) => {
-                                    let body = response.text().await;
-                                    match body {
-                                        Ok(text) => {
-                                            reg =
-                                                Regex::new("<h1 class=\"wap_none\">[^<]+").unwrap();
-                                            let title = reg.captures(text.as_str());
-                                            match title {
-                                                Some(title) => {
-                                                    println!("Title: {}", &title[0][21..]);
-                                                    file.write_all(
-                                                        format!("{}\n", &title[0][21..]).as_bytes(),
-                                                    )
-                                                    .unwrap();
-                                                }
-                                                None => {
-                                                    println!("No title error");
-                                                }
-                                            }
-                                            reg = Regex::new("[^>]+<br /><br />").unwrap();
-                                            let contents = reg.captures_iter(text.as_str());
-                                            let mut content_string = String::new();
-                                            for content in contents {
-                                                // 跳过最后一个
-                                                if content[0].contains("https://m.bqgui.cc") {
-                                                    continue;
-                                                }
-                                                // println!("{}", &content[0]);
-                                                content_string.push_str(
-                                                    &content[0].replace("<br /><br />", "\n"),
-                                                );
-                                            }
-                                            content_string.push_str("\n\n");
-                                            file.write_all(content_string.as_bytes()).unwrap();
-                                            break;
-                                        }
-                                        Err(e) => {
-                                            println!("Error: {}", e);
-                                        }
-                                    }
+                        let url = chapter_url.clone();
+                        let counter_clone = Arc::clone(&count);
+                        let index_clone = Arc::clone(&index);
+                        let chapter_content_clone = Arc::clone(&chapter_content);
+                        let permit = counter_clone.acquire_owned().await;
+                        join_list.push(tokio::spawn(async move {
+                            let content = get_content(&url).await;
+
+                            match content {
+                                Ok(content) => {
+                                    let mut chapter_content = chapter_content_clone.lock().unwrap();
+                                    let mut index1 = index_clone.lock().unwrap();
+                                    println!("index: {}, url: {}", *index1, url);
+                                    chapter_content.push((*index1, content));
+                                    *index1 += 1;
                                 }
                                 Err(e) => {
                                     println!("Error: {}", e);
                                 }
                             }
-                            std::thread::sleep(std::time::Duration::from_millis(20));
-                        }
+                            drop(permit);
+                        }));
                     }
+                    for join in join_list {
+                        join.await.unwrap();
+                    }
+                    let mut chapter_content = chapter_content.lock().unwrap();
+                    // 排序
+                    chapter_content.sort_by(|a, b| a.0.cmp(&b.0));
+                    for (_, content) in chapter_content.iter() {
+                        file.write_all(content.as_bytes()).unwrap();
+                    }
+                    //system pause
+                    let _ = std::process::Command::new("cmd")
+                        .arg("/c")
+                        .arg("pause")
+                        .status();
                 }
                 Err(e) => {
                     println!("Error: {}", e);
