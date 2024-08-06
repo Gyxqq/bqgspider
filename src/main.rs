@@ -76,6 +76,7 @@ async fn main() {
         }
     }
     print!("plaese input thread number: ");
+    std::io::stdout().flush().unwrap();
     let mut thread_number = String::new();
     match stdin().read_line(&mut thread_number) {
         Ok(_) => {
