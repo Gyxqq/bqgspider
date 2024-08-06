@@ -30,6 +30,7 @@ async fn get_content(url: &str) -> Result<String, reqwest::Error> {
                             }
                             None => {
                                 println!("No title error url {}", url);
+                                retry_time += 1;
                                 continue;
                             }
                         }
