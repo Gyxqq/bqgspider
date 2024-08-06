@@ -1,10 +1,8 @@
 use regex::Regex;
-use reqwest::{self, Url};
+use reqwest::{self};
 use std::{
     fs::File,
     io::{stdin, Write},
-    ops::Index,
-    os::{self, windows::thread},
     sync::{Arc, Mutex},
 };
 use tokio::{self, sync::Semaphore};
@@ -77,6 +75,24 @@ async fn main() {
             return;
         }
     }
+    print!("plaese input thread number: ");
+    let mut thread_number = String::new();
+    match stdin().read_line(&mut thread_number) {
+        Ok(_) => {
+            thread_number = thread_number.trim().to_string();
+        }
+        Err(e) => {
+            println!("Error: {}", e);
+            return;
+        }
+    }
+    let thread_number: usize = match thread_number.parse() {
+        Ok(thread_number) => thread_number,
+        Err(e) => {
+            println!("set default thread number 20");
+            20
+        }
+    };
     println!("Url: {}", &url);
     let body = reqwest::get(&url).await;
     match body {
@@ -112,7 +128,7 @@ async fn main() {
                         let chapter = format!("https://www.bqgui.cc{}", &chapter[0][7..]);
                         chapter_list.push(chapter.to_string());
                     }
-                    let mut count = Arc::new(tokio::sync::Semaphore::new(50));
+                    let mut count = Arc::new(tokio::sync::Semaphore::new(thread_number));
                     let mut chapter_content = Arc::new(Mutex::new(Vec::<(u32, String)>::new()));
                     let mut index = Arc::new(Mutex::new(0));
                     let mut join_list = Vec::new();
